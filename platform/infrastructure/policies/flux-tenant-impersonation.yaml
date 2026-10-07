@@ -1,0 +1,43 @@
+# Flux multi-tenancy lock-down: every Flux Kustomization / HelmRelease outside
+# flux-system must impersonate a service account of its own namespace. Without
+# this a tenant could create a Kustomization that runs with the privileges of
+# kustomize-controller.
+#
+# Complements the microsoft.flux extension multi-tenancy settings
+# (no cross namespace references, default service account).
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: platform-flux-tenant-impersonation
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: ["flux-system"]
+    resourceRules:
+      - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        resources: ["kustomizations"]
+        operations: ["CREATE", "UPDATE"]
+      - apiGroups: ["helm.toolkit.fluxcd.io"]
+        apiVersions: ["*"]
+        resources: ["helmreleases"]
+        operations: ["CREATE", "UPDATE"]
+  validations:
+    - expression: "has(object.spec.serviceAccountName) && object.spec.serviceAccountName != ''"
+      message: spec.serviceAccountName is required for Flux objects outside flux-system
+      reason: Forbidden
+    - expression: "!has(object.spec.kubeConfig)"
+      message: spec.kubeConfig (remote clusters) is not allowed for tenants
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: platform-flux-tenant-impersonation
+spec:
+  policyName: platform-flux-tenant-impersonation
+  validationActions: ["Deny"]

@@ -1,0 +1,21 @@
+# Guestbook application, shared by all environments.
+#
+# The "images" section below is the RELEASE DEFINITION of this repository:
+# the build pipeline of the guestbook application updates the frontend tag on
+# the main branch (development) and promotes the resulting commit by tagging it
+# (acceptance: <version>-acc.N, production: <version>). Do not edit by hand.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - frontend
+  - redis
+components:
+  - ../components/node-pool
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: guestbook
+    includeSelectors: false
+images:
+  - name: guestbook-frontend
+    newName: contosoplatform.azurecr.io/marketing/guestbook-frontend
+    newTag: 2026.1007.1

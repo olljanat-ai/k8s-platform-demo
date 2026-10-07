@@ -1,0 +1,47 @@
+# Prevents tenants from hijacking each other's host names on the shared
+# Gateway. An HTTPRoute may only use:
+#   - <namespace>.<anything>   (the default host name, e.g.
+#                               fi-marketing-guestbook.apps.example.com)
+#   - host names listed in the namespace annotation
+#     platform.example.com/allowed-hostnames (comma separated), which is
+#     managed by the platform team in the tenant onboarding definition.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: platform-httproute-hostnames
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: platform.example.com/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: ["gateway.networking.k8s.io"]
+        apiVersions: ["*"]
+        resources: ["httproutes", "grpcroutes"]
+        operations: ["CREATE", "UPDATE"]
+  variables:
+    - name: allowed
+      expression: >-
+        has(namespaceObject.metadata.annotations) &&
+        'platform.example.com/allowed-hostnames' in namespaceObject.metadata.annotations ?
+        namespaceObject.metadata.annotations['platform.example.com/allowed-hostnames'].split(',').map(h, h.trim()) :
+        []
+  validations:
+    - expression: >-
+        has(object.spec.hostnames) && size(object.spec.hostnames) > 0 &&
+        object.spec.hostnames.all(h,
+          h.split('.')[0] == namespaceObject.metadata.name || h in variables.allowed)
+      messageExpression: >-
+        'host names must start with "' + namespaceObject.metadata.name +
+        '." or be listed in the namespace annotation platform.example.com/allowed-hostnames'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: platform-httproute-hostnames
+spec:
+  policyName: platform-httproute-hostnames
+  validationActions: ["Deny"]

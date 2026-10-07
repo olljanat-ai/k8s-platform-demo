@@ -1,0 +1,15 @@
+# Production follows the highest semver tag WITHOUT pre-release suffix,
+# e.g. 2026.1007.3. Acceptance tags (2026.1007.3-acc.1) are ignored.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: tenant
+  namespace: ${namespace}
+spec:
+  interval: 5m
+  url: ${tenant_repo_url}
+  # Azure DevOps access with the workload identity of source-controller
+  # (microsoft.flux extension with workload identity enabled).
+  provider: azure
+  ref:
+    semver: ">=0.0.0"

@@ -1,0 +1,17 @@
+# Acceptance follows the highest semver tag INCLUDING pre-releases, i.e.
+# release candidates like 2026.1007.3-acc.1. Plain dev-* tags are not semver
+# and therefore ignored. A production tag (2026.1007.3) of the same build sorts
+# above its acc tags and points to the same commit, so it changes nothing.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: tenant
+  namespace: ${namespace}
+spec:
+  interval: 2m
+  url: ${tenant_repo_url}
+  # Azure DevOps access with the workload identity of source-controller
+  # (microsoft.flux extension with workload identity enabled).
+  provider: azure
+  ref:
+    semver: ">=0.0.0-0"

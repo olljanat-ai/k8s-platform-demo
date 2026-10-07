@@ -1,0 +1,8 @@
+# Acceptance cluster. Applied from the highest <version>-acc.N tag.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+replicas:
+  - name: frontend
+    count: 2

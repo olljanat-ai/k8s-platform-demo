@@ -1,0 +1,5 @@
+.git
+vendor
+azure-pipelines.yml
+pipelines/
+README.md

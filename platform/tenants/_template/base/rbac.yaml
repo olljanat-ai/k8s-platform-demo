@@ -1,0 +1,23 @@
+# Identity used by Flux to apply the tenant repository. Bound to the built-in
+# "admin" ClusterRole inside this namespace only. Cluster scoped objects and
+# other namespaces are out of reach; objects labelled
+# platform.example.com/managed=true are protected by an admission policy.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flux-reconciler
+  namespace: ${namespace}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flux-reconciler
+  namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+  - kind: ServiceAccount
+    name: flux-reconciler
+    namespace: ${namespace}

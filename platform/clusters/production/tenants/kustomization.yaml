@@ -1,0 +1,5 @@
+# Tenant instances (= namespaces) running in the production cluster.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../tenants/fi-marketing-guestbook/main

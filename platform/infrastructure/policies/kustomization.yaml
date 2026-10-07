@@ -1,0 +1,10 @@
+# Tenant guard rails: native ValidatingAdmissionPolicies (CEL, no third-party
+# policy engine required) and the RBAC tenants get in their namespaces.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - node-pool-placement.yaml
+  - flux-tenant-impersonation.yaml
+  - platform-managed-objects.yaml
+  - httproute-hostnames.yaml
+  - tenant-rbac.yaml

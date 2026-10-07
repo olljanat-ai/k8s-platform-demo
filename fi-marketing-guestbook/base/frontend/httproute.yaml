@@ -1,0 +1,19 @@
+# Exposed via the shared platform Gateway. ${hostname} defaults to
+# <namespace>.<cluster domain>, e.g.
+#   fi-marketing-guestbook.dev.apps.example.com
+#   fi-marketing-guestbook-dev2.dev.apps.example.com
+#   fi-marketing-guestbook.apps.example.com
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: frontend
+spec:
+  parentRefs:
+    - name: ${gateway_name}
+      namespace: ${gateway_namespace}
+  hostnames:
+    - ${hostname}
+  rules:
+    - backendRefs:
+        - name: frontend
+          port: 80

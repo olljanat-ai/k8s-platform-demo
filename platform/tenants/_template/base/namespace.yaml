@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${namespace}
+  labels:
+    platform.example.com/node-pool: ${node_pool}
+    platform.example.com/group: ${group}
+    platform.example.com/tenant: ${tenant}
+    platform.example.com/gateway-access: "true"
+    # Pod Security Admission (built into Kubernetes)
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+  annotations:
+    platform.example.com/allowed-hostnames: "${allowed_hostnames:=}"

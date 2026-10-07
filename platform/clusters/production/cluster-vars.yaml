@@ -1,0 +1,23 @@
+# Cluster specific values. Flux substitutes these into the platform
+# infrastructure and tenant onboarding manifests (${variable} syntax).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-vars
+  namespace: flux-system
+data:
+  # Release channel of this cluster. Selects which Git ref the tenant
+  # repositories are followed from (see tenants/_template/<environment>).
+  environment: production
+  cluster_name: aks-platform-prod-weu
+  # Every tenant namespace gets <namespace>.<cluster_domain> by default.
+  cluster_domain: apps.example.com
+  gateway_class_name: platform-gateway
+  gateway_name: platform
+  gateway_namespace: gateway-system
+  # Azure Key Vault holding platform level secrets (e.g. wildcard certificate)
+  # and the client id of the managed identity federated with the
+  # external-secrets/platform-keyvault service account.
+  platform_keyvault_url: https://kv-platform-prod.vault.azure.net
+  platform_keyvault_client_id: 00000000-0000-0000-0000-000000000000
+  azure_tenant_id: 00000000-0000-0000-0000-000000000000

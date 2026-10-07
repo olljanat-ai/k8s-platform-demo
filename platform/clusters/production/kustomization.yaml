@@ -1,0 +1,11 @@
+# Entry point for the "production" cluster.
+#
+# The microsoft.flux AKS extension (configured by Terraform, see ../../infra)
+# creates the GitRepository "platform" in namespace "flux-system" and a root
+# Kustomization that applies this directory. Everything else is defined here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cluster-vars.yaml
+  - infrastructure.yaml
+  - tenants.yaml
