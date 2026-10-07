@@ -1,0 +1,37 @@
+# Tenant instance: namespace fi-marketing-guestbook
+#   node pool: fi (Finland)  group: marketing  tenant: guestbook
+#
+# Included by every cluster (see clusters/*/tenants). ${environment} comes
+# from the cluster-vars ConfigMap and selects which Git ref of the tenant
+# repository is followed and which overlay is applied:
+#   development -> branch main         ./environments/development
+#   acceptance  -> semver >=0.0.0-0    ./environments/acceptance
+#   production  -> semver >=0.0.0      ./environments/production
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: fi-marketing-guestbook
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: platform
+  path: ./tenants/_template/${environment}
+  components:
+    - ../components/key-vault
+  prune: true
+  postBuild:
+    substitute:
+      namespace: fi-marketing-guestbook
+      node_pool: fi
+      group: marketing
+      tenant: guestbook
+      tenant_repo_url: https://dev.azure.com/contoso/Platform/_git/fi-marketing-guestbook
+      tenant_path: ./environments/${environment}
+      keyvault_url: https://kv-fi-mkt-guestbook.vault.azure.net
+      keyvault_client_id: 00000000-0000-0000-0000-000000000000
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

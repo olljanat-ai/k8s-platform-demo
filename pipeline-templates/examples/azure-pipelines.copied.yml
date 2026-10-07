@@ -1,0 +1,46 @@
+# Variant for applications that need to customise the pipeline: copy the
+# templates/ folder of the pipeline-templates repository into the application
+# repository as pipelines/ and reference it locally. Everything else is the
+# same as in the referenced variant (guestbook-app/azure-pipelines.yml).
+name: $(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include: [main]
+pr: none
+
+parameters:
+  - name: version
+    displayName: Version to promote (keep "new" to build from the selected branch)
+    type: string
+    default: new
+  - name: skipAcceptance
+    displayName: Promote straight to production (version must already be in acceptance)
+    type: boolean
+    default: false
+  - name: devInstance
+    displayName: Development instance for a new build
+    type: string
+    default: default
+    values: [default, dev2]
+
+extends:
+  template: pipelines/build-and-promote.yml
+  parameters:
+    version: ${{ parameters.version }}
+    skipAcceptance: ${{ parameters.skipAcceptance }}
+    devInstance: ${{ parameters.devInstance }}
+
+    containerRegistry: acr-contosoplatform
+    registryLoginServer: contosoplatform.azurecr.io
+    imageRepository: marketing/guestbook-frontend
+
+    tenantProject: Platform
+    tenantRepository: fi-marketing-guestbook
+    kustomizeImageName: guestbook-frontend
+    environmentPrefix: fi-marketing-guestbook
+
+    # Example customisation: run tests before the image is built
+    preBuildSteps:
+      - script: echo "run unit tests here"
+        displayName: Unit tests

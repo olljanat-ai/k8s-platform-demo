@@ -1,0 +1,60 @@
+# Guestbook frontend: build once, promote by tagging the tenant repository.
+#
+# - Every commit to main: build + push image, deploy to development, then wait
+#   for approval of the "acceptance" and "production" environments.
+# - Promote an earlier build later: "Run pipeline" with version=<version>
+#   (e.g. 2026.1007.3). No new build is made.
+# - Test a feature branch in the second dev environment: "Run pipeline" on the
+#   branch with devInstance=dev2.
+#
+# Uses the shared template from the Platform/pipeline-templates repository. To
+# customise it, copy the templates/ folder into this repository and replace
+# "templates/build-and-promote.yml@templates" with the local path
+# (see pipeline-templates/examples/azure-pipelines.copied.yml).
+
+name: $(Date:yyyyMMdd)$(Rev:.r)   # converted to version yyyy.Mdd.r, e.g. 2026.1007.3
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    exclude: ["*.md"]
+pr: none
+
+parameters:
+  - name: version
+    displayName: Version to promote (keep "new" to build from the selected branch)
+    type: string
+    default: new
+  - name: skipAcceptance
+    displayName: Promote straight to production (version must already be in acceptance)
+    type: boolean
+    default: false
+  - name: devInstance
+    displayName: Development instance for a new build
+    type: string
+    default: default
+    values: [default, dev2]
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: Platform/pipeline-templates
+      ref: refs/tags/v1
+
+extends:
+  template: templates/build-and-promote.yml@templates
+  parameters:
+    version: ${{ parameters.version }}
+    skipAcceptance: ${{ parameters.skipAcceptance }}
+    devInstance: ${{ parameters.devInstance }}
+
+    containerRegistry: acr-contosoplatform
+    registryLoginServer: contosoplatform.azurecr.io
+    imageRepository: marketing/guestbook-frontend
+
+    tenantProject: Platform
+    tenantRepository: fi-marketing-guestbook
+    kustomizeImageName: guestbook-frontend
+    environmentPrefix: fi-marketing-guestbook

@@ -1,0 +1,33 @@
+# Second development environment: namespace fi-marketing-guestbook-dev2
+#
+# Only listed in clusters/development/tenants. Uses the same tenant repository
+# and branch as the main instance but its own overlay
+# (./environments/dev2), which can pin a different image version, e.g. one
+# built from a feature branch (see the pipeline parameter "devInstance").
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: fi-marketing-guestbook-dev2
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: platform
+  path: ./tenants/_template/${environment}
+  prune: true
+  postBuild:
+    substitute:
+      namespace: fi-marketing-guestbook-dev2
+      node_pool: fi
+      group: marketing
+      tenant: guestbook
+      tenant_repo_url: https://dev.azure.com/contoso/Platform/_git/fi-marketing-guestbook
+      tenant_path: ./environments/dev2
+      git_branch: main
+      quota_requests_cpu: "2"
+      quota_requests_memory: 4Gi
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-vars

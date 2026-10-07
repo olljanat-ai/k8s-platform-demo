@@ -1,0 +1,20 @@
+# Values tenants can use in their manifests as ${variable}; substituted by the
+# tenant Flux Kustomization (see sync.yaml). This keeps the tenant repository
+# free of cluster and namespace specific values, so the same manifests work in
+# every cluster and every instance (e.g. fi-marketing-guestbook-dev2).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-vars
+  namespace: ${namespace}
+data:
+  namespace: ${namespace}
+  node_pool: ${node_pool}
+  group: ${group}
+  tenant: ${tenant}
+  environment: ${environment}
+  cluster_name: ${cluster_name}
+  cluster_domain: ${cluster_domain}
+  hostname: ${namespace}.${cluster_domain}
+  gateway_name: ${gateway_name}
+  gateway_namespace: ${gateway_namespace}

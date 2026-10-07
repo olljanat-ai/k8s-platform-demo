@@ -1,0 +1,8 @@
+# Development cluster, namespace fi-marketing-guestbook-dev2.
+# Uses the release version from base/ unless an override is added below. The
+# pipeline writes the override when it is run with devInstance=dev2 (e.g. to
+# test a feature branch build). Remove the override to follow main again.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base

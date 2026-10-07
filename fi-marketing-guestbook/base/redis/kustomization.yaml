@@ -1,0 +1,15 @@
+# Redis leader/follower from the Kubernetes guestbook tutorial.
+# Third party images: in production mirror them into ACR (az acr import) and
+# reference them from there.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - leader.yaml
+  - follower.yaml
+images:
+  - name: redis
+    newName: docker.io/library/redis
+    newTag: 6.0.5
+  - name: gb-redis-follower
+    newName: us-docker.pkg.dev/google-samples/containers/gke/gb-redis-follower
+    newTag: v2

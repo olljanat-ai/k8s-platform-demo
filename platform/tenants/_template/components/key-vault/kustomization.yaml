@@ -1,0 +1,11 @@
+# Optional: tenant specific Azure Key Vault for External Secrets Operator.
+# Enable per instance with
+#   spec.components: ["../components/key-vault"]
+# and the variables keyvault_url + keyvault_client_id. Terraform creates the
+# Key Vault, the managed identity and its federated credential for
+#   system:serviceaccount:<namespace>:keyvault
+# Tenants then create ExternalSecrets that reference SecretStore "keyvault".
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - secret-store.yaml

@@ -1,0 +1,25 @@
+# Schedules every workload onto the node pool of the namespace. ${node_pool}
+# is provided by the platform (platform-vars ConfigMap), so the same manifests
+# work for fi-, se- and be- namespaces. Required by the platform admission
+# policy "platform-node-pool-placement".
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target:
+      group: apps
+      kind: (Deployment|StatefulSet)
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: any
+      spec:
+        template:
+          spec:
+            nodeSelector:
+              platform.example.com/node-pool: ${node_pool}
+            tolerations:
+              - key: platform.example.com/node-pool
+                operator: Equal
+                value: ${node_pool}
+                effect: NoSchedule

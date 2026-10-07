@@ -1,0 +1,24 @@
+# Wildcard certificate *.${cluster_domain}, stored in Key Vault as a
+# certificate named "wildcard-apps" (renewed by Key Vault).
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: wildcard-apps-tls
+  namespace: ${gateway_namespace}
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: SecretStore
+    name: platform-keyvault
+  target:
+    name: wildcard-apps-tls
+    template:
+      type: kubernetes.io/tls
+      engineVersion: v2
+      data:
+        tls.crt: "{{ .pfx | b64dec | pkcs12cert }}"
+        tls.key: "{{ .pfx | b64dec | pkcs12key }}"
+  data:
+    - secretKey: pfx
+      remoteRef:
+        key: secret/wildcard-apps

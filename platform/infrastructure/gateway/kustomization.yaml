@@ -1,0 +1,9 @@
+# Shared ingress for all tenants: one Gateway per cluster. Tenants attach
+# HTTPRoutes from namespaces labelled platform.example.com/gateway-access=true.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - secret-store.yaml
+  - wildcard-certificate.yaml
+  - gateway.yaml

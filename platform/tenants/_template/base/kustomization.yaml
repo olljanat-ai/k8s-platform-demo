@@ -1,0 +1,24 @@
+# Onboarding template for one tenant instance (= one namespace).
+#
+# Rendered by a Flux Kustomization per instance (see ../../<tenant>/<instance>)
+# with these postBuild variables:
+#   namespace        <node pool>-<group>-<tenant>[-<instance>]
+#   node_pool        fi | se | be ...
+#   group            e.g. marketing
+#   tenant           e.g. guestbook
+#   tenant_repo_url  Azure DevOps Git URL of the tenant repository
+#   tenant_path      path inside the tenant repository, e.g. ./environments/development
+# optional:
+#   git_branch       branch followed in development (default: main)
+#   quota_*          resource quota overrides
+#   allowed_hostnames extra host names for HTTPRoutes (comma separated)
+# plus everything from the cluster-vars ConfigMap.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - quota.yaml
+  - network-policy.yaml
+  - platform-vars.yaml
+  - sync.yaml

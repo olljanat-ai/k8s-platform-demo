@@ -1,0 +1,278 @@
+# Build once, promote by Git tag.
+#
+#   Build        - container image to ACR, version <yyyy>.<Mdd>.<run>, e.g. 2026.1007.3
+#   Development  - updates the image in the tenant repository (main branch) and
+#                  tags that commit dev-<version>. The development cluster
+#                  follows main.
+#   Acceptance   - tags the dev-<version> commit <version>-acc.<n>.
+#                  The acceptance cluster follows the highest semver tag
+#                  including pre-releases.
+#   Production   - tags the same commit <version>.
+#                  The production cluster follows the highest semver release.
+#
+# Acceptance and Production are Azure DevOps deployment jobs; add "Approvals
+# and checks" to the environments to gate them. Promotion never rebuilds: it
+# tags the exact tenant repository commit that was already running in the
+# previous environment.
+#
+# Promote an older build later (e.g. after the approval timed out): run the
+# pipeline manually with version=<version>, optionally skipAcceptance=true to
+# go straight to production with a version that is already in acceptance.
+#
+# Usage: see ../README.md. Works both when referenced from this repository
+# (extends: template: templates/build-and-promote.yml@templates) and when the
+# templates folder is copied into the application repository.
+
+parameters:
+  # ----- runtime (forward from the application pipeline) -----
+  - name: version
+    type: string
+    default: new
+  - name: skipAcceptance
+    type: boolean
+    default: false
+  - name: devInstance
+    type: string
+    default: default
+
+  # ----- application -----
+  - name: containerRegistry       # Docker registry service connection to ACR
+    type: string
+  - name: registryLoginServer     # e.g. contosoplatform.azurecr.io
+    type: string
+  - name: imageRepository         # e.g. marketing/guestbook-frontend
+    type: string
+  - name: dockerfile
+    type: string
+    default: Dockerfile
+  - name: buildContext
+    type: string
+    default: .
+  - name: releaseBranch           # only builds from this branch are promoted
+    type: string
+    default: main
+  - name: preBuildSteps           # e.g. unit tests
+    type: stepList
+    default: []
+
+  # ----- tenant repository in the platform project -----
+  - name: tenantProject           # e.g. Platform
+    type: string
+  - name: tenantRepository        # e.g. fi-marketing-guestbook
+    type: string
+  - name: tenantBranch
+    type: string
+    default: main
+  - name: kustomizeImageName      # images[].name in the tenant kustomization
+    type: string
+  - name: tenantReleasePath       # kustomization holding the release version
+    type: string
+    default: base
+  - name: tenantInstancePath      # overlays of extra dev instances: <path>/<devInstance>
+    type: string
+    default: environments
+  - name: environmentPrefix       # Azure DevOps environments <prefix>-development|acceptance|production
+    type: string
+
+  - name: pool
+    type: object
+    default:
+      vmImage: ubuntu-latest
+
+variables:
+  # Tag naming, see tenants/_template/<environment>/git-repository.yaml in the
+  # platform repository for how the clusters select them.
+  devTagPrefix: dev-
+  accTagInfix: -acc.
+  ${{ if eq(parameters.version, 'new') }}:
+    # Set by the Build stage (build number is updated to the version)
+    releaseVersion: $(Build.BuildNumber)
+  ${{ else }}:
+    releaseVersion: ${{ parameters.version }}
+
+stages:
+  - ${{ if eq(parameters.version, 'new') }}:
+    - stage: Build
+      jobs:
+        - job: Build
+          pool: ${{ parameters.pool }}
+          steps:
+            - checkout: self
+            - bash: |
+                set -euo pipefail
+                current="$(Build.BuildNumber)"
+                if [[ "$current" =~ ^[0-9]{4}\.[1-9][0-9]*\.[0-9]+$ ]]; then
+                  version="$current"   # job re-run, already converted
+                elif [[ "$current" =~ ^([0-9]{4})([0-9]{4})\.([0-9]+)$ ]]; then
+                  # yyyyMMdd.r -> yyyy.Mdd.r  (semver: no leading zeros)
+                  version="${BASH_REMATCH[1]}.$((10#${BASH_REMATCH[2]})).${BASH_REMATCH[3]}"
+                else
+                  echo "##vso[task.logissue type=error]Build number '$current' is not 'yyyyMMdd.r'. Set 'name: \$(Date:yyyyMMdd)\$(Rev:.r)' in the pipeline."
+                  exit 1
+                fi
+                echo "Version: $version"
+                echo "##vso[build.updatebuildnumber]$version"
+                echo "##vso[task.setvariable variable=releaseVersion]$version"
+              displayName: Compute version
+            - ${{ parameters.preBuildSteps }}
+            - task: Docker@2
+              displayName: Login to ACR
+              inputs:
+                command: login
+                containerRegistry: ${{ parameters.containerRegistry }}
+            - task: Docker@2
+              displayName: Build image
+              inputs:
+                command: build
+                containerRegistry: ${{ parameters.containerRegistry }}
+                repository: ${{ parameters.imageRepository }}
+                Dockerfile: ${{ parameters.dockerfile }}
+                buildContext: ${{ parameters.buildContext }}
+                tags: $(releaseVersion)
+                arguments: >-
+                  --build-arg APP_VERSION=$(releaseVersion)
+                  --label org.opencontainers.image.revision=$(Build.SourceVersion)
+                  --label org.opencontainers.image.source=$(Build.Repository.Uri)
+            - task: Docker@2
+              displayName: Push image
+              inputs:
+                command: push
+                containerRegistry: ${{ parameters.containerRegistry }}
+                repository: ${{ parameters.imageRepository }}
+                tags: $(releaseVersion)
+
+    - stage: Development
+      dependsOn: Build
+      jobs:
+        - deployment: Development
+          pool: ${{ parameters.pool }}
+          environment: ${{ parameters.environmentPrefix }}-development
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - template: steps/tenant-repo.yml
+                    parameters:
+                      tenantProject: ${{ parameters.tenantProject }}
+                      tenantRepository: ${{ parameters.tenantRepository }}
+                      tenantBranch: ${{ parameters.tenantBranch }}
+                  - bash: |
+                      set -euo pipefail
+                      cd "$(Pipeline.Workspace)/tenant"
+                      # shellcheck disable=SC1091
+                      source ../tenant-lib.sh
+                      require_version "$VERSION"
+
+                      update_image() {
+                        local file="$KUSTOMIZATION/kustomization.yaml"
+                        if yq -e '.images[] | select(.name == strenv(IMAGE_NAME))' "$file" >/dev/null 2>&1; then
+                          yq -i '(.images[] | select(.name == strenv(IMAGE_NAME))) |= (.newName = strenv(NEW_NAME) | .newTag = strenv(VERSION))' "$file"
+                        else
+                          yq -i '.images += [{"name": strenv(IMAGE_NAME), "newName": strenv(NEW_NAME), "newTag": strenv(VERSION)}]' "$file"
+                        fi
+                      }
+                      commit_and_push "$TENANT_BRANCH" update_image \
+                        "$IMAGE_NAME $VERSION to development ($KUSTOMIZATION)"
+
+                      if [[ "$TAG_DEV" == "true" && "$(Build.SourceBranch)" == "refs/heads/$RELEASE_BRANCH" ]]; then
+                        create_tag "$(devTagPrefix)$VERSION" HEAD
+                      else
+                        echo "Not tagging: only $RELEASE_BRANCH builds deployed to the default instance can be promoted."
+                      fi
+                    displayName: Deploy to development
+                    env:
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      VERSION: $(releaseVersion)
+                      IMAGE_NAME: ${{ parameters.kustomizeImageName }}
+                      NEW_NAME: ${{ parameters.registryLoginServer }}/${{ parameters.imageRepository }}
+                      TENANT_BRANCH: ${{ parameters.tenantBranch }}
+                      RELEASE_BRANCH: ${{ parameters.releaseBranch }}
+                      ${{ if eq(parameters.devInstance, 'default') }}:
+                        KUSTOMIZATION: ${{ parameters.tenantReleasePath }}
+                        TAG_DEV: "true"
+                      ${{ else }}:
+                        KUSTOMIZATION: ${{ parameters.tenantInstancePath }}/${{ parameters.devInstance }}
+                        TAG_DEV: "false"
+
+  # Builds deployed to an extra dev instance (e.g. feature branches on dev2)
+  # are never promoted.
+  - ${{ if or(ne(parameters.version, 'new'), eq(parameters.devInstance, 'default')) }}:
+    - ${{ if or(eq(parameters.version, 'new'), not(parameters.skipAcceptance)) }}:
+      - stage: Acceptance
+        ${{ if eq(parameters.version, 'new') }}:
+          dependsOn: Development
+          condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/${{ parameters.releaseBranch }}'))
+        ${{ else }}:
+          dependsOn: []
+        jobs:
+          - deployment: Acceptance
+            pool: ${{ parameters.pool }}
+            environment: ${{ parameters.environmentPrefix }}-acceptance
+            strategy:
+              runOnce:
+                deploy:
+                  steps:
+                    - template: steps/tenant-repo.yml
+                      parameters:
+                        tenantProject: ${{ parameters.tenantProject }}
+                        tenantRepository: ${{ parameters.tenantRepository }}
+                        tenantBranch: ${{ parameters.tenantBranch }}
+                    - bash: |
+                        set -euo pipefail
+                        cd "$(Pipeline.Workspace)/tenant"
+                        # shellcheck disable=SC1091
+                        source ../tenant-lib.sh
+                        require_version "$VERSION"
+
+                        commit=$(tag_commit "$(devTagPrefix)$VERSION") || fail \
+                          "Tag $(devTagPrefix)$VERSION not found in the tenant repository: version $VERSION was never deployed to development from $RELEASE_BRANCH."
+                        require_not_older "$VERSION" all
+                        for tag in $(git tag -l --points-at "$commit" "$VERSION$(accTagInfix)*"); do
+                          echo "$commit is already in acceptance as $tag, nothing to do."
+                          exit 0
+                        done
+                        # Normally <version>-acc.1. The counter is there for
+                        # customised pipelines that promote other commits.
+                        n=$(git tag -l "$VERSION$(accTagInfix)*" | wc -l)
+                        create_tag "$VERSION$(accTagInfix)$((n + 1))" "$commit"
+                      displayName: Promote to acceptance
+                      env:
+                        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                        VERSION: $(releaseVersion)
+                        RELEASE_BRANCH: ${{ parameters.releaseBranch }}
+
+    - stage: Production
+      ${{ if or(eq(parameters.version, 'new'), not(parameters.skipAcceptance)) }}:
+        dependsOn: Acceptance
+      ${{ else }}:
+        dependsOn: []
+      ${{ if eq(parameters.version, 'new') }}:
+        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/${{ parameters.releaseBranch }}'))
+      jobs:
+        - deployment: Production
+          pool: ${{ parameters.pool }}
+          environment: ${{ parameters.environmentPrefix }}-production
+          strategy:
+            runOnce:
+              deploy:
+                steps:
+                  - template: steps/tenant-repo.yml
+                    parameters:
+                      tenantProject: ${{ parameters.tenantProject }}
+                      tenantRepository: ${{ parameters.tenantRepository }}
+                      tenantBranch: ${{ parameters.tenantBranch }}
+                  - bash: |
+                      set -euo pipefail
+                      cd "$(Pipeline.Workspace)/tenant"
+                      # shellcheck disable=SC1091
+                      source ../tenant-lib.sh
+                      require_version "$VERSION"
+
+                      acc_tag=$(git tag -l "$VERSION$(accTagInfix)*" | sort -t. -k4,4n | tail -n1)
+                      [[ -n "$acc_tag" ]] || fail "Version $VERSION has not been promoted to acceptance."
+                      require_not_older "$VERSION" release
+                      create_tag "$VERSION" "$(tag_commit "$acc_tag")"
+                    displayName: Promote to production
+                    env:
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      VERSION: $(releaseVersion)

@@ -1,0 +1,77 @@
+# Pins workloads of a tenant namespace to the node pool named in the namespace
+# label "platform.example.com/node-pool" (e.g. "fi" for fi-marketing-guestbook).
+#
+# Node pools are created by Terraform with:
+#   label  platform.example.com/node-pool=<pool>
+#   taint  platform.example.com/node-pool=<pool>:NoSchedule
+#
+# The taint keeps everything else off the pool, this policy keeps tenants on
+# their own pool. Workload controllers are validated too, so that a wrong
+# Deployment is rejected at apply time (visible in Flux) instead of silently
+# failing to create Pods later.
+#
+# NOTE: When MutatingAdmissionPolicy is available on AKS the nodeSelector and
+# toleration could be injected instead of validated. Until then tenants add
+# them with the kustomize component shown in the tenant repositories.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: platform-node-pool-placement
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: platform.example.com/node-pool
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        resources: ["pods"]
+        operations: ["CREATE"]
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+        operations: ["CREATE", "UPDATE"]
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        resources: ["jobs", "cronjobs"]
+        operations: ["CREATE", "UPDATE"]
+  variables:
+    - name: pool
+      expression: "namespaceObject.metadata.labels['platform.example.com/node-pool']"
+    - name: podSpec
+      expression: >-
+        object.kind == 'Pod' ? object.spec :
+        object.kind == 'CronJob' ? object.spec.jobTemplate.spec.template.spec :
+        object.spec.template.spec
+  validations:
+    - expression: >-
+        has(variables.podSpec.nodeSelector) &&
+        'platform.example.com/node-pool' in variables.podSpec.nodeSelector &&
+        variables.podSpec.nodeSelector['platform.example.com/node-pool'] == variables.pool
+      messageExpression: >-
+        'pods in namespace ' + namespaceObject.metadata.name +
+        ' must set nodeSelector platform.example.com/node-pool: ' + variables.pool
+      reason: Forbidden
+    - expression: >-
+        !has(variables.podSpec.tolerations) ||
+        variables.podSpec.tolerations.all(t,
+          has(t.key) && t.key != '' &&
+          (t.key != 'platform.example.com/node-pool' ||
+            (has(t.value) && t.value == variables.pool)))
+      messageExpression: >-
+        'pods in namespace ' + namespaceObject.metadata.name +
+        ' may only tolerate node pool ' + variables.pool + ' (wildcard tolerations are not allowed)'
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.nodeName) || variables.podSpec.nodeName == ''"
+      message: spec.nodeName must not be set, scheduling is done by the scheduler
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: platform-node-pool-placement
+spec:
+  policyName: platform-node-pool-placement
+  validationActions: ["Deny"]

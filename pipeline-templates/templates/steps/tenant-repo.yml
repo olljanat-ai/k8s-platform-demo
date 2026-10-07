@@ -1,0 +1,103 @@
+# Clones the tenant repository (platform project) into $(Pipeline.Workspace)/tenant
+# and writes helper functions to $(Pipeline.Workspace)/tenant-lib.sh.
+#
+# Authentication uses the job access token (System.AccessToken). The build
+# service identity of the application project needs on the tenant repository:
+#   Contribute, Create tag (+ Bypass policies when pushing, if main is protected)
+# and "Limit job authorization scope to current project" must allow access to
+# the platform project (or the repository must be added to the scope).
+parameters:
+  - name: tenantProject
+    type: string
+  - name: tenantRepository
+    type: string
+  - name: tenantBranch
+    type: string
+    default: main
+
+steps:
+  - checkout: none
+  - bash: |
+      set -euo pipefail
+      cat > "$(Pipeline.Workspace)/tenant-lib.sh" <<'LIB'
+      BUILD_URL="$(System.CollectionUri)$(System.TeamProjectId)/_build/results?buildId=$(Build.BuildId)"
+
+      fail() { echo "##vso[task.logissue type=error]$*"; exit 1; }
+
+      # Versions are <yyyy>.<Mdd>.<run>, e.g. 2026.1007.3
+      require_version() {
+        [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "'$1' is not a valid version (expected e.g. 2026.1007.3)"
+      }
+
+      # Commit a tag points to (fails if the tag does not exist).
+      tag_commit() { git rev-parse -q --verify "refs/tags/$1^{commit}"; }
+
+      # Flux follows the HIGHEST matching semver tag, so a promotion of a version
+      # lower than what the environment already has would silently do nothing.
+      #   all:     compare against every semver tag (acceptance channel)
+      #   release: compare against release tags only (production channel)
+      require_not_older() {
+        local version=$1 scope=$2 pattern highest
+        if [[ "$scope" == release ]]; then
+          pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
+        else
+          pattern='^v?[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+        fi
+        highest=$( { git tag -l | grep -E "$pattern" | sed -E 's/^v//; s/-.*$//'; echo "$version"; } | sort -V | tail -n1)
+        if [[ "$highest" != "$version" ]]; then
+          fail "Version $highest is already tagged; the cluster follows the highest version so promoting $version would have no effect. To roll back, delete the newer tags (see platform README)."
+        fi
+        if [[ "$scope" == release ]] && git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
+          fail "Version $version is already released."
+        fi
+      }
+
+      create_tag() {
+        local tag=$1 commit=$2
+        if existing=$(tag_commit "$tag"); then
+          [[ "$existing" == "$(git rev-parse "$commit")" ]] || fail "Tag $tag already exists on another commit."
+          echo "Tag $tag already exists, nothing to do."
+          return
+        fi
+        git tag -a "$tag" "$commit" -m "$tag by $BUILD_URL"
+        git push origin "refs/tags/$tag"
+        echo "Tagged $(git rev-parse --short "$commit") as $tag"
+      }
+
+      # commit_and_push <branch> <update function> <message>
+      # Applies the update on top of the latest branch head, retrying when
+      # another pipeline pushed in between.
+      commit_and_push() {
+        local branch=$1 update=$2 message=$3
+        for attempt in 1 2 3 4 5; do
+          git fetch -q origin "$branch"
+          git reset -q --hard "origin/$branch"
+          "$update"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes, $branch already up to date."
+            return
+          fi
+          git commit -q -m "$message" -m "$BUILD_URL"
+          if git push -q origin "HEAD:refs/heads/$branch"; then
+            echo "Pushed $(git rev-parse --short HEAD) to $branch"
+            return
+          fi
+          echo "Push rejected (attempt $attempt), retrying..."
+          sleep $((attempt * 2))
+        done
+        fail "Could not push to $branch"
+      }
+      LIB
+      url="$(System.CollectionUri)$(echo '${{ parameters.tenantProject }}' | sed 's/ /%20/g')/_git/${{ parameters.tenantRepository }}"
+      rm -rf "$(Pipeline.Workspace)/tenant"
+      git -c http.extraheader="AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN" \
+        clone -q --branch "${{ parameters.tenantBranch }}" "$url" "$(Pipeline.Workspace)/tenant"
+      cd "$(Pipeline.Workspace)/tenant"
+      git config http.extraheader "AUTHORIZATION: bearer $SYSTEM_ACCESSTOKEN"
+      git config user.name "$(Build.DefinitionName)"
+      git config user.email "azure-pipelines@noreply.dev.azure.com"
+      echo "Tenant repository $url at $(git rev-parse --short HEAD)"
+    displayName: Clone tenant repository
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
